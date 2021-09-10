@@ -4,3 +4,4 @@ hachoir
 pyquery
 urllib3
 requests
+tinydb

@@ -15,6 +15,9 @@ from telethon.sync import TelegramClient
 from telethon.tl.custom import Button
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.types import DocumentAttributeVideo
+from tinydb import Query, TinyDB
+from tinydb.operations import delete
+from tinydb.queries import QueryLike
 
 logging.basicConfig(format='[%(levelname) 5s/%(asctime)s] %(name)s: %(message)s',
                     level=logging.WARNING)
@@ -46,8 +49,91 @@ Merhaba ben Pinterest üzerinden Video ve Resim indirebilen bir botum.
 """
 
 
+SESSION_ADI = "pinterest"
+
+
+class pinterest_db:
+    def __init__(self):
+        TinyDB.default_table_name = self.__class__.__name__
+        self.db = TinyDB(f"@{SESSION_ADI}_DB.json",
+                         ensure_ascii=False, indent=2, sort_keys=False)
+        self.sorgu = Query()
+
+    def ara(self, sorgu: QueryLike):
+        arama = self.db.search(sorgu)
+        say = len(arama)
+        if say == 1:
+            return arama[0]
+        elif say > 1:
+            cursor = arama
+            return {
+                bak['uye_id']: {
+                    "uye_nick": bak['uye_nick'],
+                    "uye_adi": bak['uye_adi']
+                }
+                for bak in cursor
+            }
+        else:
+            return None
+
+    def ekle(self, uye_id, uye_nick, uye_adi):
+        if not self.ara(self.sorgu.uye_id == uye_id):
+            return self.db.insert({
+                "uye_id": uye_id,
+                "uye_nick": uye_nick,
+                "uye_adi": uye_adi,
+            })
+        else:
+            return None
+
+    def sil(self, uye_id):
+        if not self.ara(self.sorgu.uye_id == uye_id):
+            return None
+
+        # self.db.update(delete('uye_id'), self.sorgu.uye_id == uye_id)
+        self.db.remove(self.sorgu.uye_id == uye_id)
+        return True
+
+    @property
+    def kullanici_idleri(self):
+        return list(self.ara(self.sorgu.uye_id.exists()).keys())
+
+
+async def log_yolla(event):
+    j = await event.client(
+        GetFullUserRequest(
+            event.chat_id
+        )
+    )
+    uye_id = j.user.id
+    uye_nick = f"@{j.user.username}" if j.user.username else None
+    uye_adi = f"{j.user.first_name or ''} {j.user.last_name or ''}".strip()
+    komut = event.text
+
+    # Kullanıcı Kaydet
+    db = pinterest_db()
+    db.ekle(uye_id, uye_nick, uye_adi)
+
+
+@bot.on(events.NewMessage(pattern="/kul_say"))
+async def say(event):
+    j = await event.client(
+        GetFullUserRequest(
+            event.chat_id
+        )
+    )
+
+    db = pinterest_db()
+    db.ekle(j.user.id, j.user.username, j.user.first_name)
+
+    def KULLANICILAR(): return db.kullanici_idleri
+
+    await event.client.send_message("By_Azade", f"ℹ️ `{len(KULLANICILAR())}` __Adet Kullanıcıya Sahipsin..__")
+
+
 @bot.on(events.NewMessage(pattern="/start", func=lambda e: e.is_private))
 async def start(event):
+    await log_yolla(event)
     j = await event.client(
         GetFullUserRequest(
             event.chat_id
@@ -69,6 +155,7 @@ async def start(event):
 
 @bot.on(events.NewMessage(pattern="/pvid ?(.*)", func=lambda e: e.is_private))
 async def vid(event):
+    await log_yolla(event)
     try:
         j = await event.client(
             GetFullUserRequest(
@@ -149,6 +236,7 @@ async def vid(event):
 
 @bot.on(events.NewMessage(pattern="/pimg ?(.*)", func=lambda e: e.is_private))
 async def img(event):
+    await log_yolla(event)
     j = await event.client(
         GetFullUserRequest(
             event.chat_id
@@ -224,10 +312,9 @@ async def take_screen_shot(video_file, output_directory, ttl):
     t_response, e_response = await run_command(file_genertor_command)
     if os.path.lexists(out_put_file_name):
         return out_put_file_name
-    else:
-        logger.info(e_response)
-        logger.info(t_response)
-        return None
+    logger.info(e_response)
+    logger.info(t_response)
+    return None
 
 
 def humanbytes(size):
